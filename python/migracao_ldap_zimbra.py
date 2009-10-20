@@ -98,7 +98,6 @@ class ldapSearch:
 			print ("Search error: %s" % (e[0]['desc']))
 			sys.exit(1)
 
-
 ##############
 # Code Begin #
 ##############
@@ -126,33 +125,28 @@ validUserRW = re.compile ('^(\w|[@.$-]){5,31}?[$]$')
 
 ldapQuery = ldapSearch(server, bindrootdn, bindrootpw, domainName)
 
-#################################################################################
-# First process group names.                                                    #
-# Queue all user gidNumbers from LDAP and get group name from servers users[i][1]'s. #
-#################################################################################
+###########################################################################
+# First process group names.                                              #
+# Queue all user gidNumbers from LDAP and get group name from ldap server #
+###########################################################################
 
 groups = {}
 
-groupSearchFilter='(&(objectclass=groupOfUniqueNames)(gidNumber=*)(cn=*))'
+groupSearchFilter='(&(&(objectclass=groupOfUniqueNames)(gidNumber=*))(cn=*))'
 
 for data in ldapQuery.search(groupSearchFilter, ['gidNumber', 'cn']):
 	groups[int(data[1]['gidNumber'][0])] = data[1]['cn'][0]
-
 
 ##########################
 # Now user processing... #
 ##########################
 
 users = {}
+userSearchFilter = "(&(&(&(&(&(sambaAcctFlags=[U*])(gidNumber=*))(cn=*))(uidNumber=*))(userPassword=*))(uid=*))"
 
-userSearchFilter = "(sambaAcctFlags=[U*])"
-
-for data in ldapQuery.search(userSearchFilter, ['uid', 'userPassword', 'gidNumber']):
-	try:
-		# Format: users['username'] = ('username', 'passwdhash', 'gidNumber')
-		users[data[1]['uid'][0]] = (data[1]['uid'][0], data[1]['userPassword'][0], data[1]['gidNumber'][0])
-	except KeyError:
-		pass
+for data in ldapQuery.search(userSearchFilter, ['uid', 'userPassword', 'gidNumber', 'uidNumber']):
+	# Format: users['username'] = ('username', 'passwdhash', 'gidNumber', 'uidNumber')
+	users[data[1]['uid'][0]] = (data[1]['uid'][0], data[1]['userPassword'][0], int(data[1]['gidNumber'][0]), int(data[1]['uidNumber'][0]))
 
 for i in users:
 	print 'Usuario %s' % users[i][0]
@@ -174,13 +168,13 @@ for i in users:
 			raise SenhaInvalida(2)
 
 		# Print the result on screen...
-		print ("zmprov ca %s@dees.ufmg.br temppasswordQAZXSW displayName %s" % (users[i][0], users[i][0]))
+		print ("zmprov ca %s@%s temppasswordQAZXSW displayName %s objectClass posixAccount uidNumber %s gidNumber %s homeDirectory /home/users/%s/%s loginShell /bin/false" % (users[i][0], domainName, users[i][0], users[i][3], users[i][2], groups[users[i][2]], users[i][0] ))
 		# TODO: Make Windows domain operations HERE!
-		print ("zmprov ma %s@dees.ufmg.br userPassword '%s'" % (users[i][0], users[i][1]))
+		print ("zmprov ma %s@%s userPassword '%s'" % (users[i][0], domainName, users[i][1]))
 		
 		# ... And append the output of command line to create the user with password within the database.
-		createScript.append ("zmprov ca %s@dees.ufmg.br temppasswordQAZXSW displayName %s" % (users[i][0], users[i][0]))
-		createScript.append ("zmprov ma %s@dees.ufmg.br userPassword '%s'" % (users[i][0], users[i][1]))
+		createScript.append ("zmprov ca %s@%s temppasswordQAZXSW displayName %s objectClass posixAccount uidNumber %d gidNumber %d homeDirectory /home/users/%s/%s loginShell /bin/false" % (users[i][0], domainName, users[i][0], users[i][3], users[i][2], groups[users[i][2]], users[i][0] ))
+		createScript.append ("zmprov ma %s@%s userPassword '%s'" % (users[i][0], domainName, users[i][1]))
 		print ("\n")
 	except SenhaInvalida, error: # Parses Invalid Password
 		print "Erro ao incluir senha: %s. Pulando...\n" % (error.erro)
