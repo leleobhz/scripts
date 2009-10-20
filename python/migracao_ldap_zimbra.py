@@ -12,8 +12,6 @@ import re
 server = '150.164.42.10'
 domainName = 'dees.ufmg.br'
 retrieveAttributes = None
-searchFilter = "uid=*"
-attributes = ['uid', 'userPassword']
 
 bindrootdn = "cn=Directory Manager"
 bindrootpw = "8231502!"
@@ -23,12 +21,6 @@ scriptName = 'scriptZimbra.sh'
 #########################
 # Functions and classes #
 #########################
-
-def domainToDC (domain):
-	# Thanks to http://www.skymind.com/~ocrow/python_string/ and http://amix.dk/blog/viewEntry/19291
-	#return ''.join([ ('dc=%s' % string if not ',' in string else string) for string in re.split ('(,)', re.sub('[.]', ',', domain))])
-	# Thanks to nosklo@freenode
-	return ','.join('dc=' + x for x in domain.split('.'))
 
 class SenhaInvalida(Exception):
 	'''Invalid password exception class
@@ -74,6 +66,39 @@ class createScripts:
 	def __del__(self):
 		self.script.close()
 
+class ldapSearch:
+	'''Instances ldap searches'''
+
+	def domainToDC (self, domain):
+		# Thanks to http://www.skymind.com/~ocrow/python_string/ and http://amix.dk/blog/viewEntry/19291
+		#return ''.join([ ('dc=%s' % string if not ',' in string else string) for string in re.split ('(,)', re.sub('[.]', ',', domain))])
+		# Thanks to nosklo@freenode
+		return ','.join('dc=' + x for x in domain.split('.'))
+
+	def __init__(self, server, bindrootdn, bindrootpw, domain):
+		# Open connection
+		try:
+			self.con = ldap.initialize("ldap://" + server)
+		except ldap.LDAPError, e:
+			print ("Connection error: %s" % (e[0]['desc']))
+			sys.exit(1)
+		# Attempt to bind with simple bind autentication
+		try:
+			self.con.simple_bind_s(bindrootdn, bindrootpw)
+		except ldap.LDAPError, e:
+			print ("Authentication error: %s" % (e[0]['desc']))
+			sys.exit(1)
+		self.domain = self.domainToDC(domain)
+	
+	def search(self, filter, attrib):
+		# Try make the search.
+		try:
+			return self.con.search_s(self.domain, ldap.SCOPE_SUBTREE, filter, attrib)
+		except ldap.LDAPError, e:
+			print ("Search error: %s" % (e[0]['desc']))
+			sys.exit(1)
+
+
 ##############
 # Code Begin #
 ##############
@@ -94,59 +119,68 @@ createScript = createScripts(scriptName)
 # Redirect output to Logger funcion
 sys.stdout = Logger()
 
-# Open connection
-try:
-	con = ldap.initialize("ldap://" + server)
-except ldap.LDAPError, e:
-	print ("Erro ao conectar ao banco: %s" % (e))
-	sys.exit(1)
-
-# Attempt to bind with simple bind autentication
-try:
-	con.simple_bind_s(bindrootdn, bindrootpw)
-except ldap.LDAPError, e:
-	print ("Erro ao autenticar ao banco: %s" % (e['desc']))
-	sys.exit(1)
-
-# Try make the search.
-try:
-	ldap_result = con.search_s(domainToDC(domainName), ldap.SCOPE_SUBTREE, searchFilter, attributes)
-except ldap.LDAPError, e:
-	print ("Erro ao realizar a busca: %s" % (e['desc']))
-	sys.exit(1)
-
 # Regular expression to validate users from LDAP results
 validUserRW = re.compile ('^(\w|[@.$-]){5,31}?[$]$')
 
-# Processing all data received from the search one by one
-for user in ldap_result:
-	uid = user[1]['uid'][0] # Parses User ID
-	print ("Usuário %s" % (uid))
+# Open ldap connection
+
+ldapQuery = ldapSearch(server, bindrootdn, bindrootpw, domainName)
+
+#################################################################################
+# First process group names.                                                    #
+# Queue all user gidNumbers from LDAP and get group name from servers users[i][1]'s. #
+#################################################################################
+
+groups = {}
+
+groupSearchFilter='(&(objectclass=groupOfUniqueNames)(gidNumber=*)(cn=*))'
+
+for data in ldapQuery.search(groupSearchFilter, ['gidNumber', 'cn']):
+	groups[int(data[1]['gidNumber'][0])] = data[1]['cn'][0]
+
+
+##########################
+# Now user processing... #
+##########################
+
+users = {}
+
+userSearchFilter = "(sambaAcctFlags=[U*])"
+
+for data in ldapQuery.search(userSearchFilter, ['uid', 'userPassword', 'gidNumber']):
+	try:
+		# Format: users['username'] = ('username', 'passwdhash', 'gidNumber')
+		users[data[1]['uid'][0]] = (data[1]['uid'][0], data[1]['userPassword'][0], data[1]['gidNumber'][0])
+	except KeyError:
+		pass
+
+for i in users:
+	print 'Usuario %s' % users[i][0]
 
 	try:
 #		validUser = re.search ('^[^$]+$ | ^[a-zA-Z][@_\\-\\.\\$\\w]{5,31}$', uid) # Implemented by validUserRW. *DEPRECATED*
-		validUser = validUserRW.match (uid)
+		validUser = validUserRW.match (users[i][0])
 		if validUser:
 			raise UsuarioInvalido(0)
 		try:
-			shadow = user[1]['userPassword'][0]
-			print "userPassword Shadow: %s" % (shadow)
+			users[i][1] = users[i][1]
+			print "userPassword Shadow: %s" % (users[i][1])
 		except:
 			pass
 		# Block to check if password is a encrypted password or not. Currently we work only with chypered passwords
-		if "{crypt}!!" in shadow.lower() or "{crypt}*" in shadow.lower() or shadow == None:
+		if "{crypt}!!" in users[i][1].lower() or "{crypt}*" in users[i][1].lower() or users[i][1] == None:
 			raise SenhaInvalida(0)
-		if not any ( shadow.lower().startswith(s) for s in ["{crypt}$", '{md5}', '{ssha}']):
+		if not any ( users[i][1].lower().startswith(s) for s in ["{crypt}$", '{md5}', '{ssha}']):
 			raise SenhaInvalida(2)
 
 		# Print the result on screen...
-		print ("zmprov ca %s@dees.ufmg.br temppasswordQAZXSW displayName %s" % (uid, uid))
+		print ("zmprov ca %s@dees.ufmg.br temppasswordQAZXSW displayName %s" % (users[i][0], users[i][0]))
 		# TODO: Make Windows domain operations HERE!
-		print ("zmprov ma %s@dees.ufmg.br userPassword '%s'" % (uid, shadow))
+		print ("zmprov ma %s@dees.ufmg.br userPassword '%s'" % (users[i][0], users[i][1]))
 		
 		# ... And append the output of command line to create the user with password within the database.
-		createScript.append ("zmprov ca %s@dees.ufmg.br temppasswordQAZXSW displayName %s" % (uid, uid))
-		createScript.append ("zmprov ma %s@dees.ufmg.br userPassword '%s'" % (uid, shadow))
+		createScript.append ("zmprov ca %s@dees.ufmg.br temppasswordQAZXSW displayName %s" % (users[i][0], users[i][0]))
+		createScript.append ("zmprov ma %s@dees.ufmg.br userPassword '%s'" % (users[i][0], users[i][1]))
 		print ("\n")
 	except SenhaInvalida, error: # Parses Invalid Password
 		print "Erro ao incluir senha: %s. Pulando...\n" % (error.erro)
