@@ -1,6 +1,26 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+# Copyright (c) 2009 by Leonardo Amaral <contato@leonardoamaral.com.br>
+#
+# GNU General Public License (GPL)
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
+# 02110-1301, USA.
+#
+
 import ldap
 import sys
 import re
@@ -132,7 +152,7 @@ ldapQuery = ldapSearch(server, bindrootdn, bindrootpw, domainName)
 
 groups = {}
 
-groupSearchFilter='(&(&(objectclass=groupOfUniqueNames)(gidNumber=*))(cn=*))'
+groupSearchFilter='(&(&(gidNumber=*)(cn=*))(|(|(objectClass=groupOfUniqueNames)(objectClass=posixGroup))(objectClass=sambaGroupMapping)))'
 
 for data in ldapQuery.search(groupSearchFilter, ['gidNumber', 'cn']):
 	groups[int(data[1]['gidNumber'][0])] = data[1]['cn'][0]
@@ -149,7 +169,7 @@ for data in ldapQuery.search(userSearchFilter, ['uid', 'userPassword', 'gidNumbe
 	users[data[1]['uid'][0]] = (data[1]['uid'][0], data[1]['userPassword'][0], int(data[1]['gidNumber'][0]), int(data[1]['uidNumber'][0]))
 
 for i in users:
-	print 'Usuario %s' % users[i][0]
+	print 'Usuario %s, Grupo %s (%s)' % (users[i][0], groups[users[i][2]], users[i][2])
 
 	try:
 #		validUser = re.search ('^[^$]+$ | ^[a-zA-Z][@_\\-\\.\\$\\w]{5,31}$', uid) # Implemented by validUserRW. *DEPRECATED*
@@ -166,15 +186,18 @@ for i in users:
 			raise SenhaInvalida(0)
 		if not any ( users[i][1].lower().startswith(s) for s in ["{crypt}$", '{md5}', '{ssha}']):
 			raise SenhaInvalida(2)
+		try:
 
-		# Print the result on screen...
-		print ("zmprov ca %s@%s temppasswordQAZXSW displayName %s objectClass posixAccount uidNumber %s gidNumber %s homeDirectory /home/users/%s/%s loginShell /bin/false" % (users[i][0], domainName, users[i][0], users[i][3], users[i][2], groups[users[i][2]], users[i][0] ))
-		# TODO: Make Windows domain operations HERE!
-		print ("zmprov ma %s@%s userPassword '%s'" % (users[i][0], domainName, users[i][1]))
+			# Print the result on screen...
+			print ("zmprov ca %s@%s temppasswordQAZXSW displayName %s objectClass posixAccount uidNumber %s gidNumber %s homeDirectory /home/users/%s/%s loginShell /bin/false" % (users[i][0], domainName, users[i][0], users[i][3], users[i][2], groups[users[i][2]], users[i][0] ))
+			# TODO: Make Windows domain operations HERE!
+			print ("zmprov ma %s@%s userPassword '%s'" % (users[i][0], domainName, users[i][1]))
 		
-		# ... And append the output of command line to create the user with password within the database.
-		createScript.append ("zmprov ca %s@%s temppasswordQAZXSW displayName %s objectClass posixAccount uidNumber %d gidNumber %d homeDirectory /home/users/%s/%s loginShell /bin/false" % (users[i][0], domainName, users[i][0], users[i][3], users[i][2], groups[users[i][2]], users[i][0] ))
-		createScript.append ("zmprov ma %s@%s userPassword '%s'" % (users[i][0], domainName, users[i][1]))
+			# ... And append the output of command line to create the user with password within the database.
+			createScript.append ("zmprov ca %s@%s temppasswordQAZXSW displayName %s objectClass posixAccount uidNumber %d gidNumber %d homeDirectory /home/users/%s/%s loginShell /bin/false" % (users[i][0], domainName, users[i][0], users[i][3], users[i][2], groups[users[i][2]], users[i][0] ))
+			createScript.append ("zmprov ma %s@%s userPassword '%s'" % (users[i][0], domainName, users[i][1]))
+		except KeyError, err:
+			print 'GID %s vinculado a usuário, porém não registrado no LDAP. Conferir /etc/shadow ou outro mecanismo em conjunto. Pulando usuário...' % err
 		print ("\n")
 	except SenhaInvalida, error: # Parses Invalid Password
 		print "Erro ao incluir senha: %s. Pulando...\n" % (error.erro)
