@@ -21,9 +21,19 @@
 # 02110-1301, USA.
 #
 
-import ldap
-import sys
-import re
+import imaplib
+from offlineimap import imapserver, repository, folder, mbnames, threadutil, version, syncmaster, accounts
+from offlineimap.localeval import LocalEval
+from offlineimap.threadutil import InstanceLimitedThread, ExitNotifyThread
+from offlineimap.ui import UIBase
+import re, os, os.path, offlineimap, sys, ldap
+from offlineimap.CustomConfig import CustomConfigParser
+from threading import *
+from shutil import rmtree
+import threading, socket
+import signal
+import tempfile
+import paramiko
 
 ####################
 # Server Variables #
@@ -31,12 +41,22 @@ import re
 
 server = '150.164.42.10'
 domainName = 'dees.ufmg.br'
+newdomainName = 'zimbra.astolfonet'
+newsambadomain = 'ASTOLFONET'
+newsambasid = 'S-1-5-21-3538384966-1849037480-1431206198'
 retrieveAttributes = None
 
 bindrootdn = "cn=Directory Manager"
 bindrootpw = "8231502!"
 
 scriptName = 'scriptZimbra.sh'
+
+srcimapadmmask = '*zimbra'
+srcimapadmpass = '!321phj!'
+
+newserveraddr = '192.168.1.3'
+# Zimbra private user ssh key - w/o pass
+newserversshkey = 'zimbra_key'
 
 #########################
 # Functions and classes #
@@ -69,10 +89,14 @@ class Logger(object):
 	def __init__(self):
 		self.terminal = sys.stdout
 		self.log = open("log.txt", "a")
-
+	def isatty(self):
+		return False
 	def write(self, message):
 		self.terminal.write(message)
 		self.log.write(message)
+	def flush(self):
+		self.terminal.flush()
+		self.log.flush()
 	def __del__(self):
 		self.log.close()
 
@@ -118,6 +142,137 @@ class ldapSearch:
 			print ("Search error: %s" % (e[0]['desc']))
 			sys.exit(1)
 
+class OfflineImapWrapper():
+
+	def __init__(self, srcusername, srcpasswd, dstusername, dstpasswd):
+
+		try:
+			import fcntl
+			hasfcntl = 1
+		except:
+			hasfcntl = 0
+	
+		lockfd = None
+
+		def lock(config, ui):
+			if not hasfcntl:
+				return
+			lockfd = open(self.configuration.getmetadatadir() + "/lock", "w")
+			try:
+				fcntl.flock(lockfd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+			except IOError:
+				ui.locked()
+				ui.terminate(1)
+
+		self.configuration = CustomConfigParser()
+		
+		self.configuration.add_section('general')
+		self.configuration.set('general','accounts', dstusername)
+		self.configuration.add_section('Account ' + dstusername)
+
+		self.configuration.set('Account ' + dstusername, 'localrepository', dstusername+'_local')
+		self.configuration.set('Account ' + dstusername, 'remoterepository', dstusername+'_remote')
+		
+		self.configuration.add_section('Repository ' + dstusername + '_local')
+		self.configuration.add_section('Repository ' + dstusername + '_remote')
+
+		self.configuration.set('Repository ' + dstusername + '_local', 'type', 'IMAP')
+		self.configuration.set('Repository ' + dstusername + '_local', 'remotehost', newserveraddr)
+		self.configuration.set('Repository ' + dstusername + '_local', 'remoteuser', dstusername)
+		self.configuration.set('Repository ' + dstusername + '_local', 'remotepass', dstpasswd)
+
+		self.configuration.set('Repository ' + dstusername + '_remote', 'type', 'IMAP')
+		self.configuration.set('Repository ' + dstusername + '_remote', 'remotehost', server)
+		self.configuration.set('Repository ' + dstusername + '_remote', 'remoteuser', srcusername)
+		self.configuration.set('Repository ' + dstusername + '_remote', 'remotepass', srcpasswd)
+		
+		self.monothread = 0
+		# Setup a interface
+
+		ui = offlineimap.ui.detector.findUI(self.configuration, 'TTY.TTYUI')
+		UIBase.setglobalui(ui)
+#		ui.add_debug('imap')
+#		ui.add_debug('thread')
+#		imaplib.Debug = 5
+#		threading._VERBOSE = 1
+
+		lock(self.configuration, ui)
+	
+		def sigterm_handler(signum, frame):
+			# die immediately
+			ui.terminate(errormsg="terminating...")
+		signal.signal(signal.SIGTERM,sigterm_handler)
+
+		try:
+			pidfd = open(config.getmetadatadir() + "/pid", "w")
+			pidfd.write(str(os.getpid()) + "\n")
+			pidfd.close()
+		except:
+			pass
+		
+		try:
+			activeaccounts = self.configuration.get("general", "accounts")
+			activeaccounts = activeaccounts.replace(" ", "")
+			activeaccounts = activeaccounts.split(",")
+			allaccounts = accounts.AccountHashGenerator(self.configuration)
+
+			if self.monothread:
+				threadutil.initInstanceLimit("ACCOUNTLIMIT", 1)
+			else:
+				threadutil.initInstanceLimit("ACCOUNTLIMIT", self.configuration.getdefaultint("general", "maxsyncaccounts", 1))
+
+			for reposname in self.configuration.getsectionlist('Repository'):
+				for instancename in ["FOLDER_" + reposname, "MSGCOPY_" + reposname]:
+					if self.monothread:
+						threadutil.initInstanceLimit(instancename, 1)
+					else:
+						threadutil.initInstanceLimit(instancename, self.configuration.getdefaultint('Repository ' + reposname, "maxconnections", 1))
+	
+			syncaccounts = []
+			for account in activeaccounts:
+				if account not in syncaccounts:
+					syncaccounts.append(account)
+	
+			siglisteners = []
+			def sig_handler(signum, frame):
+				if signum == signal.SIGUSR1:
+					# tell each account to do a full sync asap
+					signum = (1,)
+				elif signum == signal.SIGHUP:
+					# tell each account to die asap
+					signum = (2,)
+				elif signum == signal.SIGUSR2:
+					# tell each account to do a full sync asap, then die
+					signum = (1, 2)
+				# one listener per account thread (up to maxsyncaccounts)
+				for listener in siglisteners:
+					for sig in signum:
+						listener.put_nowait(sig)
+			signal.signal(signal.SIGHUP,sig_handler)
+			signal.signal(signal.SIGUSR1,sig_handler)
+			signal.signal(signal.SIGUSR2,sig_handler)
+	
+			threadutil.initexitnotify()
+			t = ExitNotifyThread(target=syncmaster.syncitall,
+						name='Sync Runner',
+						kwargs = {'accounts': syncaccounts,
+						'config': self.configuration,
+						'siglisteners': siglisteners})
+			t.setDaemon(1)
+			t.start()
+		
+		except:
+			ui.mainException()
+
+		try:
+			threadutil.exitnotifymonitorloop(threadutil.threadexited)
+		except SystemExit:
+			raise
+		except:
+			ui.mainException()				  # Also expected to terminate.
+
+		rmtree(self.configuration.getmetadatadir())
+
 ##############
 # Code Begin #
 ##############
@@ -136,7 +291,7 @@ except NameError:
 createScript = createScripts(scriptName)
 
 # Redirect output to Logger funcion
-sys.stdout = Logger()
+#sys.stdout = Logger()
 
 # Regular expression to validate users from LDAP results
 validUserRW = re.compile ('^(\w|[@.$-]){5,31}?[$]$')
@@ -145,13 +300,22 @@ validUserRW = re.compile ('^(\w|[@.$-]){5,31}?[$]$')
 
 ldapQuery = ldapSearch(server, bindrootdn, bindrootpw, domainName)
 
+# Instancing SSH Connection
+
+remoteshell = paramiko.SSHClient()
+try:
+	remoteshell.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+	remoteshell.connect(newserveraddr, username='zimbra', key_filename=newserversshkey)
+except paramiko.PasswordRequiredException:
+	print 'Senha de chave ainda não suportada'
+	sys.exit(1)
+
 ###########################################################################
 # First process group names.                                              #
 # Queue all user gidNumbers from LDAP and get group name from ldap server #
 ###########################################################################
 
 groups = {}
-
 groupSearchFilter='(&(&(gidNumber=*)(cn=*))(|(|(objectClass=groupOfUniqueNames)(objectClass=posixGroup))(objectClass=sambaGroupMapping)))'
 
 for data in ldapQuery.search(groupSearchFilter, ['gidNumber', 'cn']):
@@ -188,14 +352,21 @@ for i in users:
 			raise SenhaInvalida(2)
 		try:
 
-			# Print the result on screen...
-			print ("zmprov ca %s@%s temppasswordQAZXSW displayName %s objectClass posixAccount uidNumber %s gidNumber %s homeDirectory /home/users/%s/%s loginShell /bin/false" % (users[i][0], domainName, users[i][0], users[i][3], users[i][2], groups[users[i][2]], users[i][0] ))
-			# TODO: Make Windows domain operations HERE!
-			print ("zmprov ma %s@%s userPassword '%s'" % (users[i][0], domainName, users[i][1]))
-		
-			# ... And append the output of command line to create the user with password within the database.
-			createScript.append ("zmprov ca %s@%s temppasswordQAZXSW displayName %s objectClass posixAccount uidNumber %d gidNumber %d homeDirectory /home/users/%s/%s loginShell /bin/false" % (users[i][0], domainName, users[i][0], users[i][3], users[i][2], groups[users[i][2]], users[i][0] ))
-			createScript.append ("zmprov ma %s@%s userPassword '%s'" % (users[i][0], domainName, users[i][1]))
+			# Now is the time to run everything
+			try:
+				stdin, stdout, stderr = remoteshell.exec_command ("zmprov ca %s@%s temppasswordQAZXSW displayName %s objectClass sambaSamAccount objectClass posixAccount uidNumber %s gidNumber %s homeDirectory /home/users/%s/%s loginShell /bin/false sambaSID %s sambaDomainName %s sambaAcctFlags [UX]" % (users[i][0], newdomainName, users[i][0], users[i][3], users[i][2], groups[users[i][2]], users[i][0], newsambasid, newsambadomain ))
+				print stderr.read()
+				print stdout.read()
+			except paramiko.SSHException:
+				print 'Impossível executar zmprov em host remoto. Abortando'
+				sys.exit(1)
+			OfflineImapWrapper(users[i][0] + srcimapadmmask, srcimapadmpass, users[i][0], 'temppasswordQAZXSW')
+			try:
+				stdin, stdout, stderr = remoteshell.exec_command ("zmprov ma %s@%s userPassword '%s'" % (users[i][0], newdomainName, users[i][1]))
+			except paramiko.SSHException:
+				print 'Impossível executar zmprov em host remoto. Abortando'
+				sys.exit(1)
+
 		except KeyError, err:
 			print 'GID %s vinculado a usuário, porém não registrado no LDAP. Conferir /etc/shadow ou outro mecanismo em conjunto. Pulando usuário...' % err
 		print ("\n")
@@ -206,3 +377,5 @@ for i in users:
 
 createScript.__del__() # Delete and close script files
 sys.stdout.__del__() # Delete and close log files
+
+
