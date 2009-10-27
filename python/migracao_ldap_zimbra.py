@@ -34,6 +34,7 @@ import threading, socket
 import signal
 import tempfile
 import paramiko
+import password
 
 ####################
 # Server Variables #
@@ -47,12 +48,10 @@ newsambasid = 'S-1-5-21-3538384966-1849037480-1431206198'
 retrieveAttributes = None
 
 bindrootdn = "cn=Directory Manager"
-bindrootpw = "8231502!"
 
 scriptName = 'scriptZimbra.sh'
 
 srcimapadmmask = '*zimbra'
-srcimapadmpass = '!321phj!'
 
 newserveraddr = '192.168.1.3'
 # Zimbra private user ssh key - w/o pass
