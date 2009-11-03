@@ -374,7 +374,3 @@ for i in users:
 	except UsuarioInvalido, error: # Parses Invalid User
 		print "Erro ao incluir usuario: %s. Pulando...\n" % (error.erro)
 
-createScript.__del__() # Delete and close script files
-sys.stdout.__del__() # Delete and close log files
-
-
