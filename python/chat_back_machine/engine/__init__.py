@@ -1,7 +1,11 @@
 #!/usr/bin/env python
-import sys,  os,  stat
+import sys
+import os
+import stat
+
 from xml.etree.ElementTree import parse
 from datetime import datetime
+from PyDbLite import Base
 
 def walktree (top = ".", depthfirst = True):
     names = os.listdir(top)
@@ -13,7 +17,8 @@ def walktree (top = ".", depthfirst = True):
         except os.error:
             continue
         if stat.S_ISDIR(st.st_mode):
-            for (newtop, children) in walktree (os.path.join(top, name), depthfirst):
+            for (newtop, children) in walktree (os.path.join(top, name), 
+                                                depthfirst):
                 yield newtop, children
     if depthfirst:
        yield top, names
@@ -21,19 +26,28 @@ def walktree (top = ".", depthfirst = True):
 
 class kopeteLog():
     masslog = []
-    def __init__(self, directory = os.path.join(os.path.expanduser("~"), ".kde/share/apps/kopete/logs")):
+    def __init__(self, directory=os.path.join(os.path.expanduser("~"), 
+                        ".kde/share/apps/kopete/logs")):
         self.requestLogList(directory)
         
     def searchLogs(self,  dir):
         logfiles = []
         for (basepath, children) in walktree(dir):
             for child in children:
-                if child[-4:] == ".xml":
+                if child.endswith (".xml"):
                     logfiles.append(os.path.join(basepath, child))
         return logfiles
         
     def requestLogList(self,  directory):
         for file in self.searchLogs(directory):
+            if file.find('WlmProtocol'):
+                protocol = 'wlm'
+            elif file.find('ICQProtocol'):
+                protocol = 'icq'
+            elif file.find('JabberProtocol'):
+                protocol = 'jabber'
+            else:
+                protocol = ''
             print "File: %s" % file
             xmllog = parse(file)
             for head in xmllog.getiterator('head'):
@@ -52,10 +66,19 @@ class kopeteLog():
                 inbound = msg.attrib['in']
                 message = msg.text
                 sender = msg.attrib['from']
-                date = datetime.strptime("%s;%s;%s" % (year,  month,  msg.attrib['time']) , "%Y;%m;%d %H:%M:%S")
-                self.masslog.append ( {'date' : date.strftime("%Y%m%d"), 'time' : date.strftime("%H:%M:%S"),  'from' : contactfrom,  'to' : contactto,  'sender' : sender,  'inbound' : inbound,  'nick' : nick,  'message' : message} )
+                date = datetime.strptime("%s;%s;%s" % 
+                                         (year,  month,  msg.attrib['time']) , 
+                                         "%Y;%m;%d %H:%M:%S")
+                self.masslog.append ( 
+                                     {'protocol' : protocol,  
+                                     'date' : date.strftime("%Y%m%d"), 
+                                     'time' : date.strftime("%H:%M:%S"),  
+                                     'from' : contactfrom,  'to' : contactto,  
+                                     'sender' : sender,  'inbound' : inbound, 
+                                     'nick' : nick,  'message' : message})
 
 if __name__ == "__main__":
     teste = kopeteLog()
-    print teste.masslog[30]
+    print "Tamanho do log: %s mensagens" % len(teste.masslog)
+    print teste.masslog[16691]
     sys.exit(1)
