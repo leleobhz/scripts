@@ -6,9 +6,12 @@ from xml.etree.ElementTree import parse
 from datetime import datetime
 from PyDbLite import Base
 
-class kopeteLog():
-    def __init__(self, directory=os.path.join(os.path.expanduser("~"), 
-                        ".kde/share/apps/kopete/logs")):
+class KopeteLog():
+    def __init__(self, directory=None):
+
+        if not directory:
+                directory=os.path.join(os.path.expanduser("~"), 
+                        ".kde/share/apps/kopete/logs")
 
         self.messages = Base('kopete.db')  # Database stuff - Initializing...
         self.messages.create('protocol', 'date', 'time', 'msgfrom', 'msgto',  'sender',  'inbound',  'nick',  'message',  mode='override')
@@ -24,16 +27,16 @@ class kopeteLog():
                     logfiles.append(os.path.join(basepath, child))
         return logfiles
         
-    def feedDatabase(self,  file):
-        if file.find('WlmProtocol'):
+    def feedDatabase(self,  filepath):
+        if 'WlmProtocol' in filepath:
             protocol = 'wlm'
-        elif file.find('ICQProtocol'):
+        elif 'ICQProtocol' in filepath:
             protocol = 'icq'
-        elif file.find('JabberProtocol'):
+        elif 'JabberProtocol' in filepath:
             protocol = 'jabber'
         else:
-            protocol = ''
-        xmllog = parse(file)
+            protocol = 'unknown'
+        xmllog = parse(filepath)
         for head in xmllog.getiterator('head'):
             for date in head.getiterator('date'):
                 month=date.attrib['month']
@@ -62,6 +65,6 @@ class kopeteLog():
                                  message=message)
 
 if __name__ == "__main__":
-    teste = kopeteLog()
+    teste = KopeteLog()
     print "%s\n\n" % teste.messages(date='20091217')[1]
     sys.exit(1)
