@@ -1,28 +1,10 @@
 #!/usr/bin/env python
 import sys
 import os
-import stat
 
 from xml.etree.ElementTree import parse
 from datetime import datetime
 from PyDbLite import Base
-
-def walktree (top = ".", depthfirst = True):
-    names = os.listdir(top)
-    if not depthfirst:
-        yield top, names
-    for name in names:
-        try:
-            st = os.lstat(os.path.join(top, name))
-        except os.error:
-            continue
-        if stat.S_ISDIR(st.st_mode):
-            for (newtop, children) in walktree (os.path.join(top, name), 
-                                                depthfirst):
-                yield newtop, children
-    if depthfirst:
-       yield top, names
-
 
 class kopeteLog():
     def __init__(self, directory=os.path.join(os.path.expanduser("~"), 
@@ -36,8 +18,8 @@ class kopeteLog():
         
     def searchLogs(self,  dir):
         logfiles = []
-        for (basepath, children) in walktree(dir):
-            for child in children:
+        for (basepath,  dirnames,  filenames) in os.walk(dir):
+            for child in filenames:
                 if child.endswith (".xml"):
                     logfiles.append(os.path.join(basepath, child))
         return logfiles
@@ -78,11 +60,8 @@ class kopeteLog():
                                  msgfrom=contactfrom,  msgto=contactto,
                                  sender=sender,  inbound=inbound,  nick=nick,
                                  message=message)
-    
-    def locate(self):
-        return self.messages(date='20091217')
-    
+
 if __name__ == "__main__":
     teste = kopeteLog()
-    print "%s\n\n" % teste.locate()[0]
+    print "%s\n\n" % teste.messages(date='20091217')[1]
     sys.exit(1)
