@@ -3,7 +3,7 @@
 SOURCES_D_FOLDER="/etc/apt/sources.list.d"
 
 # Hammer
-LAST_U_VER=$(curl -s -o- http://archive.ubuntu.com/ubuntu/dists/ | awk -v RS='<[/]?a[^>]*>' '!/td/ && !/archive/ && !/body/ && !/th/ && /.*\// && !/.*-./ {x[i++]=$0} END{print substr (x[i-1], 0, length(x[i-1])-1)}')
+LAST_U_VER=$(curl -s -o- http://releases.ubuntu.com/ | awk -v RS='<[/]?a[^>]*>' '!/td/ && !/archive/ && !/body/ && !/th/ && /.*\// && !/.*-./ {x[i++]=$0} END{print substr (x[i-1], 0, length(x[i-1])-1)}')
 
 function update_src_file
 {
