@@ -8,12 +8,12 @@ else
 fi
 
 SLSKPATH="/usr/local/bin/"
-LAST=`wget -q --user-agent="Wget/leleobhz.org automatic update script v0.1 - Version retrieve step" "http://www.soulseekqt.net/news/node/1" -O- | grep "/SoulseekQT/Linux/" | head -n1 | awk '{ print $3 }' | sed -e "s/\./-/g"`
+LAST=`wget -q --user-agent="Wget/leleobhz.org automatic update script v0.1 - Version retrieve step" "http://www.soulseekqt.net/news/node/1" -O- | grep "Latest Linux 64-bit build" | grep -o '<a .*href=.*>' | awk -F\< '{print $2}' | awk -F\> '{print $2}' | xargs basename -s .tgz`
 
-LINK="http://www.soulseekqt.net/SoulseekQT/Linux/SoulseekQt-$LAST$BIT.tgz"
+LINK="http://www.soulseekqt.net/SoulseekQT/Linux/$LAST$BIT.tgz"
 
-echo "Updating Soulseek to version $LAST to $SLSKPATH. Please accept sudo credential now."
-gksudo true
+echo "Updating Soulseek to version `echo $LAST | sed -e 's,SoulseekQt-,,g'` to $SLSKPATH. Please accept sudo credential now."
+sudo true
 
 # Showtime!
 TMP=`mktemp`
