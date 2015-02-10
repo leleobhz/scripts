@@ -2,15 +2,15 @@
 
 if [[ `uname -m` -eq "x86_64" ]];
 then
-	BIT="-64bit";
+	BIT="64bit";
 else
-	BIT="";
+	BIT="32bit";
 fi
 
 SLSKPATH="/usr/local/bin/"
-LAST=`wget -q --user-agent="Wget/leleobhz.org automatic update script v0.1 - Version retrieve step" "http://www.soulseekqt.net/news/node/1" -O- | grep "Latest Linux 64-bit build" | grep -o '<a .*href=.*>' | awk -F\< '{print $2}' | awk -F\> '{print $2}' | xargs basename -s .tgz`
+LAST=`wget -q --user-agent="Wget/leleobhz.org automatic update script v0.1 - Version retrieve step" "http://www.soulseekqt.net/news/node/1" -O- | grep "Latest Linux" | sed -e 's,<br,\n,g' | grep -o '<a .*href=.*>' | awk -F\< '{print $2}' | awk -F\> '{print $2}' | xargs basename -s .tgz | grep ${BIT} | xargs basename -s "-${BIT}"`
 
-LINK="http://www.soulseekqt.net/SoulseekQT/Linux/$LAST$BIT.tgz"
+LINK="http://www.soulseekqt.net/SoulseekQT/Linux/$LAST-$BIT.tgz"
 
 echo "Updating Soulseek to version `echo $LAST | sed -e 's,SoulseekQt-,,g'` to $SLSKPATH. Please accept sudo credential now."
 sudo true
